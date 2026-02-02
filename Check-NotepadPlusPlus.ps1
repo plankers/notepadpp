@@ -47,6 +47,9 @@ begin {
         "Don Ho"
     )
 
+    # Expected CA
+    $expectedCA = "GlobalSign"
+
     # Cache for downloaded official hashes (version -> hash)
     $script:officialHashCache = @{}
 
@@ -223,11 +226,20 @@ function Analyze-NotepadFile {
             if ($isLegitimate) {
                 # Validate certificate chain
                 $chainStatus = "VALID"
+                $hasExpectedCA = $false
                 try {
                     $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
                     $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online
                     $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EntireChain
                     $chainValid = $chain.Build($sig.SignerCertificate)
+
+                    # Check that chain includes expected CA (GlobalSign)
+                    foreach ($element in $chain.ChainElements) {
+                        if ($element.Certificate.Subject -match $expectedCA -or $element.Certificate.Issuer -match $expectedCA) {
+                            $hasExpectedCA = $true
+                            break
+                        }
+                    }
 
                     if (-not $chainValid -or $chain.ChainStatus.Count -gt 0) {
                         foreach ($status in $chain.ChainStatus) {
@@ -249,8 +261,13 @@ function Analyze-NotepadFile {
                     $sigStatus = "REVOKED"
                     $sigResult = "REVOKED"
                 }
+                elseif (-not $hasExpectedCA) {
+                    Write-Host "WRONG CA (expected $expectedCA)" -ForegroundColor Red
+                    $sigStatus = "SUSPICIOUS"
+                    $sigResult = "WRONG CA"
+                }
                 elseif ($chainStatus -eq "VALID") {
-                    Write-Host "ok" -ForegroundColor Gray
+                    Write-Host "ok ($expectedCA)" -ForegroundColor Gray
                     $sigStatus = "GOOD"
                     $sigResult = "GOOD"
                 }
