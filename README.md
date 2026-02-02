@@ -7,7 +7,7 @@ In December 2024, compromised versions of Notepad++ were discovered being distri
 ## Features
 
 - **Digital Signature Verification**: Checks that the executable is signed by the legitimate Notepad++ publisher (Don Ho)
-- **Certificate Chain Validation**: Verifies the signing certificate against the CA with online revocation checking (CRL/OCSP)
+- **Certificate Chain Validation**: Verifies the certificate chain goes back to GlobalSign CA with online revocation checking (CRL/OCSP)
 - **GitHub Release Comparison**: Downloads the official release from GitHub and compares SHA256 hashes
 - **PE Header Analysis**: Automatically detects executable architecture (x86, x64, ARM64) to download the correct official release
 
@@ -40,7 +40,7 @@ The script checks each file and reports:
 
 | Check | Status Values |
 |-------|---------------|
-| **Signature** | `GOOD`, `SUSPICIOUS`, `NOT SIGNED`, `TAMPERED`, `REVOKED`, `INVALID` |
+| **Signature** | `GOOD`, `SUSPICIOUS`, `WRONG CA`, `NOT SIGNED`, `TAMPERED`, `REVOKED`, `INVALID` |
 | **Chain** | `VALID`, `REVOKED`, `EXPIRED`, `UNTRUSTED`, `UNKNOWN`, `ERROR` |
 | **GitHub** | `MATCH`, `MISMATCH`, `UNAVAILABLE`, `SKIPPED` |
 
@@ -56,7 +56,7 @@ The script checks each file and reports:
 
 1. **Signature Check**: Uses `Get-AuthenticodeSignature` to verify the Authenticode signature and checks that the signer matches "Notepad++" or "Don Ho"
 
-2. **Certificate Chain Validation**: Builds the certificate chain with online revocation checking enabled to verify the certificate hasn't been revoked
+2. **Certificate Chain Validation**: Builds the certificate chain with online revocation checking, verifies the chain includes GlobalSign as the CA, and checks for revocation
 
 3. **GitHub Comparison**:
    - Detects the executable's version from file metadata
