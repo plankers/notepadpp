@@ -1,5 +1,3 @@
-# Notepad++ Security Checker
-
 A PowerShell script to verify the integrity of Notepad++ installations by checking digital signatures, certificate chain validity, and comparing against official GitHub releases.
 
 ## Background
