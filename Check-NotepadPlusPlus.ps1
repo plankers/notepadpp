@@ -190,12 +190,8 @@ function Analyze-NotepadFile {
     try {
         $fileInfo = Get-Item $FilePath
         $versionInfo = $fileInfo.VersionInfo
-        # Extract clean version number (e.g., "8.9.1" from "8.9.1 (64-bit)")
-        $version = if ($versionInfo.ProductVersion -match '^\d+\.\d+(\.\d+)?') {
-            $Matches[0]
-        } else {
-            $versionInfo.ProductVersion
-        }
+        # Use FileVersion and strip trailing .0 if present (e.g., "8.9.1.0" -> "8.9.1")
+        $version = $versionInfo.FileVersion -replace '\.0$', ''
         $fileHash = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash.ToLower()
 
         Write-Host "$FilePath" -ForegroundColor White
