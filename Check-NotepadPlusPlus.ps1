@@ -28,47 +28,55 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true)]
+    [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true)]
+    [Alias("FullName")]
     [string[]]$Path,
 
     [switch]$SkipGitHubCheck
 )
 
-$ErrorActionPreference = "Stop"
+begin {
+    $ErrorActionPreference = "Stop"
+    $script:results = @()
+    $script:goodCount = 0
+    $script:badCount = 0
 
-# Known legitimate signers for Notepad++
-$legitimateSigners = @(
-    "Notepad++",
-    "Don Ho"
-)
+    # Known legitimate signers for Notepad++
+    $legitimateSigners = @(
+        "Notepad++",
+        "Don Ho"
+    )
 
-# Cache for downloaded official hashes (version -> hash)
-$script:officialHashCache = @{}
+    # Cache for downloaded official hashes (version -> hash)
+    $script:officialHashCache = @{}
 
-# Function to get the official hash from GitHub
-function Get-OfficialHash {
+    # Function to get the official hash from GitHub
+    function Get-OfficialHash {
     param(
         [string]$Version,
         [string]$FilePath
     )
 
-    # Determine architecture from PE header
+    # Determine architecture from PE header (read only what we need)
+    $archSuffix = ".x64"
     try {
-        $bytes = [System.IO.File]::ReadAllBytes($FilePath)
-        $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
-        $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+        $stream = [System.IO.File]::OpenRead($FilePath)
+        $reader = New-Object System.IO.BinaryReader($stream)
+        $stream.Position = 0x3C
+        $peOffset = $reader.ReadInt32()
+        $stream.Position = $peOffset + 4
+        $machine = $reader.ReadUInt16()
+        $reader.Close()
+        $stream.Close()
 
-        # Notepad++ naming: no suffix for 32-bit, .x64. for 64-bit, .arm64. for ARM
         $archSuffix = switch ($machine) {
             0x014c { "" }         # IMAGE_FILE_MACHINE_I386 (32-bit, no suffix)
             0x8664 { ".x64" }     # IMAGE_FILE_MACHINE_AMD64
             0xAA64 { ".arm64" }   # IMAGE_FILE_MACHINE_ARM64
-            default { ".x64" }    # Default to x64
+            default { ".x64" }
         }
     }
-    catch {
-        $archSuffix = ".x64"
-    }
+    catch { }
 
     # Return cached hash if we already downloaded this version
     $cacheKey = "$Version$archSuffix"
@@ -144,12 +152,12 @@ function Get-OfficialHash {
             if ($officialExe) {
                 Write-Host "done" -ForegroundColor Gray
                 $hash = (Get-FileHash $officialExe.FullName -Algorithm SHA256).Hash.ToLower()
-                Write-Host "  Extracted to: $tempDir" -ForegroundColor Gray
                 Write-Host "  Official SHA256: $hash" -ForegroundColor Gray
                 $script:officialHashCache[$cacheKey] = $hash
 
-                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-                Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+                # Cleanup
+                if (Test-Path $tempFile) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
+                if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
 
                 return $hash
             }
@@ -160,9 +168,9 @@ function Get-OfficialHash {
         catch {
             Write-Host "failed ($($_.Exception.Message))" -ForegroundColor Yellow
         }
-        finally {
-            if (Test-Path $tempFile) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
-        }
+
+        # Cleanup failed attempt
+        if (Test-Path $tempFile) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
     }
 
     if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
@@ -182,7 +190,12 @@ function Analyze-NotepadFile {
     try {
         $fileInfo = Get-Item $FilePath
         $versionInfo = $fileInfo.VersionInfo
-        $version = $versionInfo.ProductVersion
+        # Extract clean version number (e.g., "8.9.1" from "8.9.1 (64-bit)")
+        $version = if ($versionInfo.ProductVersion -match '^\d+\.\d+(\.\d+)?') {
+            $Matches[0]
+        } else {
+            $versionInfo.ProductVersion
+        }
         $fileHash = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash.ToLower()
 
         Write-Host "$FilePath" -ForegroundColor White
@@ -194,7 +207,13 @@ function Analyze-NotepadFile {
 
         if ($sig.Status -eq "Valid") {
             $signerName = $sig.SignerCertificate.Subject
-            $isLegitimate = $legitimateSigners | Where-Object { $signerName -match [regex]::Escape($_) }
+            $isLegitimate = $false
+            foreach ($signer in $legitimateSigners) {
+                if ($signerName -match [regex]::Escape($signer)) {
+                    $isLegitimate = $true
+                    break
+                }
+            }
 
             if ($isLegitimate) {
                 Write-Host "valid (Notepad++), checking chain... " -ForegroundColor Gray -NoNewline
@@ -326,43 +345,42 @@ function Analyze-NotepadFile {
     }
 }
 
-$results = @()
-$goodCount = 0
-$badCount = 0
-
-Write-Host "Notepad++ Security Checker" -ForegroundColor Cyan
-if ($SkipGitHubCheck) {
-    Write-Host "(GitHub comparison disabled)" -ForegroundColor Yellow
-}
-Write-Host ""
-
-# Analyze each provided path
-foreach ($filePath in $Path) {
-    if (-not (Test-Path $filePath)) {
-        Write-Host "File not found: $filePath" -ForegroundColor Red
-        Write-Host ""
-        continue
+    Write-Host "Notepad++ Security Checker" -ForegroundColor Cyan
+    if ($SkipGitHubCheck) {
+        Write-Host "(GitHub comparison disabled)" -ForegroundColor Yellow
     }
-
-    $result = Analyze-NotepadFile -FilePath $filePath
-    $results += $result
     Write-Host ""
 }
 
-if ($results.Count -eq 0) {
-    Write-Host "No valid files to analyze." -ForegroundColor Yellow
-    exit 1
+process {
+    foreach ($filePath in $Path) {
+        if (-not (Test-Path $filePath)) {
+            Write-Host "File not found: $filePath" -ForegroundColor Red
+            Write-Host ""
+            continue
+        }
+
+        $result = Analyze-NotepadFile -FilePath $filePath
+        $script:results += $result
+        Write-Host ""
+    }
 }
 
-# Summary
-Write-Host ""
-if ($badCount -gt 0) {
-    Write-Host "FAILED: $badCount file(s) did not pass verification" -ForegroundColor Red
-    Write-Host "Download fresh copy from https://notepad-plus-plus.org/downloads/" -ForegroundColor Yellow
-}
-elseif ($goodCount -gt 0) {
-    Write-Host "OK: All files verified" -ForegroundColor Green
-}
+end {
+    if ($script:results.Count -eq 0) {
+        Write-Host "No valid files to analyze." -ForegroundColor Yellow
+        exit 1
+    }
 
-# Return results for programmatic use
-$results
+    # Summary
+    if ($script:badCount -gt 0) {
+        Write-Host "FAILED: $script:badCount file(s) did not pass verification" -ForegroundColor Red
+        Write-Host "Download fresh copy from https://notepad-plus-plus.org/downloads/" -ForegroundColor Yellow
+    }
+    elseif ($script:goodCount -gt 0) {
+        Write-Host "OK: All files verified" -ForegroundColor Green
+    }
+
+    # Return results for programmatic use
+    $script:results
+}

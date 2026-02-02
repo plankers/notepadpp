@@ -31,7 +31,6 @@ In December 2024, compromised versions of Notepad++ were discovered being distri
 
 # Pipeline input
 Get-ChildItem -Path C:\ -Recurse -Filter "notepad++.exe" -ErrorAction SilentlyContinue |
-    Select-Object -ExpandProperty FullName |
     .\Check-NotepadPlusPlus.ps1
 ```
 
@@ -48,9 +47,10 @@ The script checks each file and reports:
 ### Overall Verdicts
 
 - **VERIFIED**: Valid signature from legitimate publisher + matches official GitHub release
-- **LIKELY OK**: Valid signature, but GitHub check unavailable
-- **CERTIFICATE REVOKED**: The signing certificate has been revoked by the CA
-- **POTENTIALLY COMPROMISED**: Failed signature or GitHub hash mismatch
+- **OK (GitHub unavailable)**: Valid signature, but GitHub check failed
+- **REVOKED - DO NOT TRUST**: The signing certificate has been revoked by the CA
+- **HASH MISMATCH**: Signature valid but file differs from official release
+- **FAILED**: Signature verification failed
 
 ## How It Works
 
@@ -60,8 +60,8 @@ The script checks each file and reports:
 
 3. **GitHub Comparison**:
    - Detects the executable's version from file metadata
-   - Detects architecture from PE header
-   - Downloads the matching official release (tries MSI first, then portable ZIP, then NSIS installer with 7-Zip)
+   - Detects architecture from PE header (x86, x64, ARM64)
+   - Downloads the matching official MSI from GitHub (falls back to NSIS installer with 7-Zip if MSI extraction fails)
    - Extracts `notepad++.exe` and compares SHA256 hashes
 
 ## Limitations
@@ -77,4 +77,4 @@ MIT License
 
 ## Disclaimer
 
-This repository and the documents within is intended to provide general guidance. The information contained in this document is for educational and informational purposes only. This repository is not intended to provide advice and is provided “AS IS.” The publisher makes no claims, promises, or guarantees about the accuracy, completeness, or adequacy of the information contained herein. Organizations should engage appropriate legal, business, technical, and audit expertise within their specific organization for review of requirements and effectiveness of implementations.
+This repository and the documents within is intended to provide general guidance. The information contained in this document is for educational and informational purposes only. This repository is not intended to provide advice and is provided "AS IS." The publisher makes no claims, promises, or guarantees about the accuracy, completeness, or adequacy of the information contained herein. Organizations should engage appropriate legal, business, technical, and audit expertise within their specific organization for review of requirements and effectiveness of implementations.
